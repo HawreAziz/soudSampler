@@ -1,0 +1,183 @@
+package game;
+
+import lombok.*;
+import base.graphics.Window;
+import base.timer.RepeatTimer;
+import controller.LocalLevelController;
+import controller.menu.*;
+import framework.Framework;
+import model.*;
+import model.character.Player;
+import model.character.PlayerImpl;
+import model.item.spell.BasicBulletSpell;
+import model.menu.*;
+import network.LevelServer;
+import network.PlayerClient;
+import utils.LevelLoader;
+import view.*;
+import view.menu.*;
+
+
+/**
+ * @author Axel
+ */
+
+public class ScreenManager implements base.ScreenManager {
+	public static enum PlayType {
+		LOCAL, HOST, JOIN;
+	}
+
+	private final Window window;
+	private final Framework framework;
+	private final MultiplayerMenuController mpMenuController;
+	private final MenuView[] views;
+	private final MenuModel[] models;
+	private final Player.Keys keys;
+	@Setter private int playType;
+	private RepeatTimer repeatTimer;
+	private LevelView levelView;
+	private LocalLevelController localLevelController;
+	private LevelServer server;
+
+	private static final String ICON_IMAGE_PATH = "images/other/icon.png",
+			BACKGROUND_IMAGE_PATH = "images/other/background.png";
+
+	public ScreenManager(Framework framework, Player.Keys keys, String ip) {
+		this.framework = framework;
+		this.keys = keys;
+
+		window = framework.createWindow("SideScroller", ICON_IMAGE_PATH);
+
+		models = new MenuModel[] {
+				new MainMenuModel(),
+				new LevelMenuModel(),
+				new MultiplayerMenuModel(ip)
+		};
+
+		views = new MenuView[] {
+				new MenuView(framework, models[MAIN_MENU_INDEX]),
+				new MenuView(framework, models[LEVEL_MENU_INDEX]),
+				new MultiplayerMenuView(framework, models[MULTIPLAYER_MENU_INDEX])
+		};
+
+		new MainMenuController(this, models[MAIN_MENU_INDEX],
+				views[MAIN_MENU_INDEX], framework);
+
+		new LevelMenuController(this, models[LEVEL_MENU_INDEX],
+				views[LEVEL_MENU_INDEX], framework);
+
+		mpMenuController = new MultiplayerMenuController(this,
+				models[MULTIPLAYER_MENU_INDEX],
+				views[MULTIPLAYER_MENU_INDEX],
+				framework);
+
+		audio.Music.MENU_SCREEN.play();
+		setScreen(MAIN_MENU_INDEX);
+	}
+
+	public void startLocalGame(Level level, PlayerImpl player) {
+		player.setPosition(30, 100);
+		level.addDynamicObject(Level.ObjectIndex.PLAYERS, player);
+		levelView = new LocalLevelView(level, player, framework.
+				loadImage(BACKGROUND_IMAGE_PATH), framework);
+		localLevelController = new LocalLevelController(level,
+				(LocalLevelView)levelView, framework);
+	}
+
+	public void hostNewGame(Level level) {
+		server = new LevelServer(level, BACKGROUND_IMAGE_PATH, framework);
+		server.start();
+	}
+
+	public void joinHostedGame() {
+		val mpMenuModel = (MultiplayerMenuModel)models[MULTIPLAYER_MENU_INDEX];
+		levelView = new OnlineLevelView(mpMenuModel.getIP(), framework, keys);
+	}
+
+	@Override public void loadLevel(int number) {
+		if (playType == PLAY_TYPE_JOIN) {
+			joinHostedGame();
+			try {
+				// Wait for client to attempt connection to server
+				Thread.sleep(PlayerClient.CONNECTION_ATTEMPT_MAX_MILLISECONDS);
+			} catch (InterruptedException e) {}
+
+			val onlineLevelView = (OnlineLevelView)levelView;
+
+			// No server found at the input IP address
+			if (!onlineLevelView.hasConnectedSuccessfully()) return;
+
+			// due to lack of time, just stop the menu
+			// music when joining a multiplayer level
+			audio.Music.stop();
+
+			repeatTimer = framework.getRepeatTimer(new Runnable() {
+				@Override public void run() {
+					if (onlineLevelView.shouldExitLevel())
+						resetToMainMenu();
+				}
+			});
+		}
+
+		else {
+			val level = LevelLoader.loadLevel(number, framework);
+
+			if (playType == PLAY_TYPE_HOST) {
+				hostNewGame(level);
+				joinHostedGame();
+
+				// due to lack of time, just stop the menu
+				// music when joining a multiplayer level
+				audio.Music.stop();
+
+				repeatTimer = framework.getRepeatTimer(new Runnable() {
+					@Override public void run() {
+						if (level.hasBeenCompleted())
+							resetToMainMenu();
+					}
+				});
+			}
+
+			else {
+				val sheet = framework.getSheet(DynamicObject.INDEX_PLAYER);
+				val spell = new BasicBulletSpell(framework.getSheet(DynamicObject.
+						INDEX_BASIC_BULLET));
+
+				val player = new PlayerImpl(sheet, spell, keys);
+				startLocalGame(level, player);
+
+				audio.Music.get(number).play();
+
+				repeatTimer = framework.getRepeatTimer(new Runnable() {
+					@Override public void run() {
+						if (level.hasBeenCompleted()) {
+							localLevelController.pause();
+							resetToMainMenu();
+						}
+					}
+				});
+			}
+		}
+
+		repeatTimer.start();
+		window.setScreen(levelView.getScreen());
+	}
+
+	private void resetToMainMenu()
+	{
+		window.setScreen(views[MAIN_MENU_INDEX].getScreen());
+		models[LEVEL_MENU_INDEX].setPosition(0);
+		repeatTimer.stop();
+		audio.Music.MENU_SCREEN.play();
+	}
+
+	@Override public void setScreen(int index) {
+		models[index].setPosition(0);
+		views[index].draw();
+
+		if (views[index] instanceof MultiplayerMenuView)
+			mpMenuController.draw();
+
+		window.setScreen(views[index].getScreen());
+	}
+}

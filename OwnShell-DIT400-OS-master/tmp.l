@@ -1,0 +1,22 @@
+total 194
+drwxr-x--- 3 hawre hawre    21 Nov 16 15:32 .
+drwxr-x--- 3 hawre hawre     3 Nov 16 13:06 ..
+-rwxr-x--- 1 hawre hawre    53 Nov 16 13:10 compile
+drwxr-x--- 8 hawre hawre    13 Nov 16 13:06 .git
+-rwxr-x--- 1 hawre hawre  6792 Nov 16 13:06 hello
+-rwxr-x--- 1 hawre hawre 21919 Nov 16 15:27 lsh
+-rw-r----- 1 hawre hawre  6526 Nov 16 15:27 lsh.c
+-rw-r----- 1 hawre hawre  6523 Nov 16 15:27 lsh.c~
+-rw-r----- 1 hawre hawre 14032 Nov 16 15:27 lsh.o
+-rw-r----- 1 hawre hawre   383 Nov 16 13:06 Makefile
+-rwxr-x--- 1 hawre hawre 21684 Nov 16 14:04 .nfs00000000013a41e600000039
+-rwxr-x--- 1 hawre hawre 21919 Nov 16 15:05 .nfs00000000013aefc600000046
+-rwxr-x--- 1 hawre hawre 21919 Nov 16 15:21 .nfs000000000148eb0c00000048
+-rwxr-x--- 1 hawre hawre 21919 Nov 16 15:26 .nfs000000000148f51e00000049
+-rwxr-x--- 1 hawre hawre 21911 Nov 16 15:27 .nfs000000000148f5eb0000004a
+-rw-r----- 1 hawre hawre  3154 Nov 16 13:06 parse.c
+-rw-r----- 1 hawre hawre   355 Nov 16 13:06 parse.h
+-rw-r----- 1 hawre hawre 11600 Nov 16 13:06 parse.o
+-rw-r----- 1 hawre hawre   294 Nov 16 13:06 README.md
+-rw-r----- 1 hawre hawre   192 Nov 16 13:06 test.c
+-rw-r----- 1 hawre hawre     0 Nov 16 15:32 tmp.l

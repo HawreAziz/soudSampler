@@ -1,0 +1,457 @@
+/* 
+ * Main source code file for lsh shell program
+ *
+ * You are free to add functions to this file.
+ * If you want to add functions in a separate file 
+ * you will need to modify Makefile to compile
+ * your additional functions.
+ * your additional functions.
+ *
+ * Add appropriate comments in your code to make it
+ * easier for us while grading your assignment.
+ *
+ * Submit the entire lab1 folder as a tar archive (.tgz).
+ * Command to create submission archive: 
+        $> tar cvf lab1.tgz lab1/
+ *
+ * All the best 
+ */
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <readline/readline.h>
+#include <readline/history.h>
+#include "parse.h"
+#include <signal.h>
+#include <unistd.h>
+#include <fcntl.h>
+#define CHECK(x) if(!(x)) { perror(#x " failed"); abort(); /* or whatever */ }
+/*
+ * Function declarations
+ */
+
+ void PrintCommand(int, Command *);
+ void PrintPgm(Pgm *);
+ void stripwhite(char *);
+ void doThings (Command *);
+ void pipeLine (Pgm *);
+ void reDirectOutput( Command *);
+ void reDirectInput( Command *);
+ void changeDir(Pgm *);
+ static void sig_chld ( int );
+ static void sig_handler ( int );
+ int getExitPos(char *, Pgm *pgm);
+
+/* When non-zero, this global means the user is done using this program. */
+ int done = 0;
+ pid_t mainProcess;
+ pid_t currentProcess;
+
+/*
+ * Name: main
+ *
+ * Description: Gets the ball rolling...
+ *
+ */
+ int main(void)
+ {
+    Command cmd;
+    int n;
+    signal(SIGINT, sig_handler);
+    signal(SIGTSTP, SIG_IGN);
+    signal(SIGCHLD, sig_handler);
+    while (!done) {
+        char *line;
+        line = readline("$ ");
+        if (!line) {
+            /* Encountered EOF at top level */
+            done = 1;
+        }
+        else {
+            /*
+             * Remove leading and trailing whitespace from the line
+             * Then, if there is anything left, add it to the history list
+             * and execute it.
+             */
+             stripwhite(line);
+
+             if(*line) {
+                add_history(line);
+                /* execute it */
+                n = parse(line, &cmd);
+                doThings(&cmd);
+
+            }
+        }
+
+        if(line) {
+            free(line);
+        }
+    }
+    return 0;
+}
+
+
+int getExitPos(char *pattern, Pgm *pgm){
+    Pgm *temp = pgm;
+    if(strcmp(temp->pgmlist[0], pattern) == 0){
+        return 1;
+    }
+
+    while (temp != NULL) {
+        char **pgmPointer = temp->pgmlist;
+        while(*(++pgmPointer)){
+            if(strcmp(*pgmPointer, pattern) == 0){
+                return 0;
+            }
+
+        }
+
+        temp = temp->next;
+    }
+    return -1;
+} 
+
+/*
+* With this method we are able to 
+* change directory correctly.
+* cd ".." goes back to previous directory.
+* cd and "~" goes to root.
+*
+* Takes a Pgm pointer as argument.
+*  
+*/
+
+void changeDir(Pgm *p){
+    char *home;
+    char *command = p->pgmlist[1];
+    
+    /*
+    * If its just a normal cd without anything after it
+    * or "~" then just go to the home folder.
+    */
+    if(command == NULL || (strcmp(command, "~")) == 0){
+        home = getenv("HOME");
+        if(chdir(home) == -1){
+            perror("Error");
+        } 
+    }
+
+    /*
+    * Else if there is ".." after the cd 
+    * go back to the previous folder/directory.
+    */
+    else if(strcmp(command, "..") == 0){
+        chdir("..");
+    }
+
+    /*
+    * Or else go to the directory that
+    * is inserted as arguments.
+    */
+    else{
+        if(chdir(command) == -1){
+            perror("Error");
+        }     
+    }
+}
+
+/*
+* All execution of pipes, command and
+* redirections happens here.
+*/
+void doThings( Command *cmd ){
+
+   /*
+    * Check if the command contains thw word 
+    * cd.
+   */
+    if(strcmp(cmd->pgm->pgmlist[0], "cd") == 0){
+        changeDir(cmd->pgm);
+        return;
+    }
+
+    pid_t childpid;
+    mainProcess = getppid();
+    childpid = fork();
+    int pos = getExitPos("exit", cmd->pgm);
+    if(pos == 1){
+        kill(0, SIGKILL);
+    }
+   
+        /*
+        * If the childprocess creates correctly
+        * it will enter here.
+        */
+        if(childpid == 0){
+
+          if(cmd->bakground == 1){
+            setpgid(childpid, 0);
+          }
+            currentProcess = childpid;
+
+            if(cmd->rstdout != NULL){
+                reDirectOutput(cmd);
+            }
+
+            if(cmd->rstdin != NULL){
+                reDirectInput(cmd);
+            }
+
+            /*
+            * If there is no pipeline then it will
+            * enter here and execute the command. 
+            */
+            if(cmd->pgm->next == NULL){
+                char **cmdList = cmd->pgm->pgmlist;
+                /*
+                * Will return an error if the command 
+                * is unknown or doesnt exist.
+                * Else it will execute the command.
+                * 
+                */
+                if(execvp(*cmdList,cmdList) == -1){
+                    if(cmd->bakground == 1){
+                        perror("\rError");
+                        printf("\r$ ");
+                        
+                    }else{
+                       perror("Error");
+                    }
+                    
+                    exit(-1);
+                }
+            }
+             /*
+             * If there is a pipeline in the command
+             * then call the pipeLine Method
+             * which takes a pgm as a argument.
+            */
+             else if(cmd->pgm->next != NULL){
+                pipeLine(cmd->pgm);
+            }
+        } 
+        else if(childpid < 0){
+            perror("Error");
+            exit(-1);
+        }
+
+
+        /*
+        * Parent process. Waiting here
+        * for his child to finish his
+        * jobs.
+        */
+        else{
+        
+            if(cmd->bakground != 1){
+                wait(NULL);
+            }
+           
+        }
+}
+   
+ /*
+* This method will let us use the
+* functionallity of ">". It will
+* let us save something to a file.
+*/
+void reDirectOutput(Command *cmd){
+    int out, in;
+    out = getFileDiscriptor(cmd->rstdout, 1);
+    if(cmd->rstdin != NULL){
+        in = getFileDiscriptor(cmd->rstdin, 0);
+        dup2(in, 0);
+        close(in);
+    }
+    dup2(out, 1);
+    close(out);
+    char **cmdList = cmd->pgm->pgmlist;
+    execvp(*cmdList, cmdList);
+}
+
+
+int getFileDiscriptor(char *file, int fileStatus){
+    if(fileStatus){
+        return open(file, O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWUSR );
+    }
+    return open(file, O_RDONLY);
+}
+
+
+/*
+* This method will let us use the
+* functionallity of the "<". It will
+* let us read from a file and print it
+* out.
+*/
+void reDirectInput(Command *cmd){
+    int in, out;
+    in = getFileDiscriptor(cmd->rstdin, 0);
+    if(cmd->rstdout != NULL){
+        out = getFileDiscriptor(cmd->rstdout, 1);
+        dup2(out, 1);
+        close(out);
+    }
+    dup2(in, 0);
+    close(in);
+    char **cmdList = cmd->pgm->pgmlist;
+     execvp(*cmdList, cmdList);
+}
+
+
+/* 
+* Child processes with no parent waiting are killed here.
+*/
+void sig_chld(int signo){
+    pid_t pid;
+    int status;
+
+     waitpid(-1, &status, WNOHANG);
+}
+
+void sig_handler (int signo){
+  
+
+    if(signo == SIGINT){
+        printf("\n\r$ ");
+    }
+    else if(signo == SIGCHLD){
+        
+      sig_chld(signo);
+    } 
+ }
+
+ /*
+  *  Takes a program pointer as argument.
+  *  Will search for the next pipeline and execute
+  *  the commands in a recursive way.
+  */
+
+  void pipeLine (Pgm *p){
+    int fd[2];
+    pipe(fd);
+    pid_t childpid = fork();
+   
+
+    /* Child process
+     * if fork succeds then it will enter here.
+     */
+     if(childpid == 0){
+        /*
+         * Writing to the pipe we need to close the reading end
+         * to do so.
+         */
+         dup2(fd[1], 1);
+         close(fd[0]);
+
+       /*
+        * Base case for the recursive call will enter here when there is no 
+        * more pipes.
+        */
+        if(p->next->next==NULL){
+            char **cmdList = p->next->pgmlist;
+            if((execvp(*cmdList, cmdList)) == -1){
+                perror("Error");
+                exit(0);
+            }
+        }
+        /*
+        *This is the recursive call will be called until no 
+        *more pipes.
+        */
+        else{
+
+            pipeLine(p->next);
+        }
+
+    }
+
+    /*
+     *  Parent process.
+     */
+     else{
+
+        /*
+        * We read from pipe here need to close
+        * the writing end for that.
+        */
+        int pos = getExitPos("exit", p);
+
+        dup2(fd[0], 0);
+        close(fd[1]);
+        char **cmdList = p->pgmlist;
+        if((execvp(*cmdList, cmdList))==-1){
+            perror("Error");
+            exit(0);
+        }
+        if(pos != 0){
+          wait(NULL);
+      }
+  }
+}
+
+/*
+ * Name: PrintCommand
+ *
+ * Description: Prints a Command structure as returned by parse on stdout.
+ *
+ */
+ void PrintCommand (int n, Command *cmd){
+
+    printf("Parse returned %d:\n", n);
+    printf("   stdin : %s\n", cmd->rstdin  ? cmd->rstdin  : "<none>" );
+    printf("   stdout: %s\n", cmd->rstdout ? cmd->rstdout : "<none>" );
+    printf("   bg    : %s\n", cmd->bakground ? "yes" : "no");
+    PrintPgm(cmd->pgm);
+}
+
+/*
+ * Name: PrintPgm
+ *
+ */
+ void PrintPgm (Pgm *p)
+ {
+    if (p == NULL) {
+        return;
+    }
+    else {
+        char **pl = p->pgmlist;
+
+        /* The list is in reversed order so print
+         * it reversed to get right
+         */
+         PrintPgm(p->next);
+         printf("    [");
+            while (*pl) {
+                printf("%s ", *pl++);
+            }
+            printf("]\n");
+        }
+    }
+
+/*
+ * Name: stripwhite
+ *
+ * Description: Strip whitespace from the start and end of STRING.
+ */
+ void stripwhite (char *string)
+ {
+    register int i = 0;
+
+    while (whitespace( string[i] )) {
+        i++;
+    }
+
+    if (i) {  
+        strcpy (string, string + i);
+    }
+
+    i = strlen( string ) - 1;
+    while (i> 0 && whitespace (string[i])) {
+        i--;
+    }
+
+    string [++i] = '\0';
+}
